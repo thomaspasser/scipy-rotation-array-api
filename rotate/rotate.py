@@ -51,6 +51,8 @@ class Rotation:
 
     def __len__(self) -> int:
         xp = array_api_compat.array_namespace(self._quat)
+        if self._quat.ndim == 1:
+            return 1
         return xp.prod(xp.asarray(self._quat.shape[:-1]))
 
     def __getitem__(self, key: Union[int, slice]):
@@ -397,5 +399,8 @@ class Rotation:
         if shape is None:
             shape = ()
         elif isinstance(shape, int):
-            shape = (shape,)
+            if shape == 1:
+                shape = ()  # preserve single quaternion as (4,)
+            else:
+                shape = (shape,)
         return cls(xp.broadcast_to(xp.asarray([0, 0, 0, 1.0], dtype=dtype, device=device), shape + (4,)))

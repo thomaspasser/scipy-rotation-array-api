@@ -2,8 +2,8 @@ import time
 from typing import Any, List, Tuple
 
 import cpuinfo
-import jax.numpy as jnp
 import jax
+import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 from jax.scipy.spatial.transform import Rotation as jRotation
@@ -57,7 +57,7 @@ def run_benchmark(
             res = []
             for _ in range(n_repeat):
                 start = time.perf_counter()
-                calc_res = func2(*test_values_xp)
+                _ = func2(*test_values_xp)
                 end = time.perf_counter()
                 print(f"Time elapsed: {end - start:.6f} s")
                 res.append(end - start)

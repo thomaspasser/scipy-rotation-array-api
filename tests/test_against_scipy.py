@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation as sRotation
 
-from rotate import Rotation, skew
+from rotate import Rotation
 
 
 @pytest.fixture
