@@ -86,8 +86,11 @@ class Rotation:
         return cls(q, normalize=True)
 
     @classmethod
-    def from_rotvec(cls, rotvec):
+    def from_rotvec(cls, rotvec, degrees=False):
         xp = array_api_compat.array_namespace(rotvec)
+        if degrees:
+            rotvec = rotvec * xp.pi / 180.0
+
         angle = xp.linalg.vector_norm(rotvec, axis=-1, keepdims=True)
 
         scale1 = xp.sin(angle / 2) / angle
@@ -159,7 +162,7 @@ class Rotation:
         # quat[..., ind] = xp.sin(angles / 2)
         # quat[..., 3] = xp.cos(angles / 2)
 
-        # Above doesn't work with jax, so we do this - it is ugly though
+        # Above assignments don't work with jax, so we do this - it is ugly though
         if ind == 0:
             quat = xp.stack([xp.sin(angles / 2), xp.zeros_like(angles), xp.zeros_like(angles), xp.cos(angles / 2)], axis=-1)
         elif ind == 1:
@@ -191,7 +194,7 @@ class Rotation:
             + 2 * q13[..., :, None] * q13[..., None, :]
         )
 
-    def as_rotvec(self):
+    def as_rotvec(self, degrees=False):
         xp = array_api_compat.array_namespace(self._quat)
         # We pick the sign of the scalar part to be positive
         # Ensures that the angle is between 0 and pi
@@ -211,7 +214,10 @@ class Rotation:
         scale2 = 2 + angle2 / 12 + 7 * angle2 * angle2 / 2880
         scale = xp.where(small, scale2, scale1)
 
-        return scale[..., None] * sign[..., None] * self._quat[..., :3]
+        rotvec = scale[..., None] * sign[..., None] * self._quat[..., :3]
+        if degrees:
+            rotvec = rotvec * 180 / xp.pi
+        return rotvec
 
     def as_mrp(self):
         xp = array_api_compat.array_namespace(self._quat)
