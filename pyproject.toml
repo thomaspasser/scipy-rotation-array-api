@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rotate"
+version = "1.0.0"
+authors = [{ name = "Thomas Passer Jensen", email = "thomas@passer.ws" }]
+description = "Implementation of rotations in 3D"
+# readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = ['array-api-compat', 'typing_extensions']
+
+[tool.ruff]
+line-length = 160
+
+[tool.ruff.lint]
+extend-select = ["I"]
