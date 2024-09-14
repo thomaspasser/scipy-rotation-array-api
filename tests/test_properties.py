@@ -100,7 +100,7 @@ def test_double_inverse(values):
 
     rot2 = rot.inv().inv()
 
-    # exactly equal since the inversing is just component sign flipping
+    # exactly equal since the inversing is simply component sign flipping
     assert aa.all(rot.as_quat() == rot2.as_quat())
 
 
@@ -116,13 +116,13 @@ def test_rotation_matrix_properties(values):
     assert aa.linalg.det(rot.as_matrix()) == pytest.approx(1.0)
 
     # inverse of a rotation matrix is its transpose
-    a1 = rot.as_matrix()
-    a2 = rot.inv().as_matrix()
+    R = rot.as_matrix()
+    Rt = rot.inv().as_matrix()
 
-    assert aa.all(a1 == aa.linalg.matrix_transpose(a2))
+    assert aa.all(R == aa.linalg.matrix_transpose(Rt))
 
     # and that is in fact the inverse
-    res = a1 @ a2
+    res = R @ Rt
     assert res[0, 0] == pytest.approx(1.0)
     assert res[0, 1] == pytest.approx(0.0)
     assert res[0, 2] == pytest.approx(0.0)
@@ -184,7 +184,7 @@ def test_to_mrp_and_back(values):
 
 
 @hypothesis.given(st.lists(st.floats(min_value=-1, max_value=1), min_size=4, max_size=4))
-def test_to_euler_and_back(values):
+def test_to_eulerXYZ_and_back(values):
     inp = aa.asarray(values)
     hypothesis.assume(aa.linalg.vector_norm(inp) != 0)
 
@@ -197,3 +197,79 @@ def test_to_euler_and_back(values):
     q2 = rot2.as_quat()
 
     assert quaternions_are_equal(q1, q2)
+
+
+# Weirdly, this fails with small strange differences - but so does scipy!?
+@hypothesis.given(st.lists(st.floats(min_value=-1, max_value=1), min_size=4, max_size=4))
+def test_to_eulerZXZ_and_back(values):
+    inp = aa.asarray(values)
+    hypothesis.assume(aa.linalg.vector_norm(inp) != 0)
+
+    rot = Rotation.from_quat(inp)
+
+    eul = rot.as_euler("ZXZ")
+    rot2 = Rotation.from_euler("ZXZ", eul)
+
+    q1 = rot.as_quat()
+    q2 = rot2.as_quat()
+
+    assert quaternions_are_equal(q1, q2)
+
+
+# random quat and vector
+@hypothesis.given(
+    st.lists(st.floats(min_value=-1, max_value=1), min_size=4, max_size=4), st.lists(st.floats(min_value=-1, max_value=1), min_size=3, max_size=3)
+)
+def test_rotate_vector(qvalues, vvalues):
+    qinp = aa.asarray(qvalues)
+    vinp = aa.asarray(vvalues)
+    hypothesis.assume(aa.linalg.vector_norm(qinp) != 0)
+
+    rot = Rotation.from_quat(qinp)
+
+    v = rot.apply(vinp)
+    assert v.shape == (3,)
+    # Length is preserved
+    assert aa.linalg.vector_norm(v) == pytest.approx(aa.linalg.vector_norm(vinp))
+
+    # Rotating back should give the same vector
+    v2 = rot.inv().apply(v)
+    assert v2[0] == pytest.approx(vinp[0])
+    assert v2[1] == pytest.approx(vinp[1])
+    assert v2[2] == pytest.approx(vinp[2])
+
+
+# rotvec with 2*pi added should be the same
+@hypothesis.given(st.lists(st.floats(min_value=-1, max_value=1), min_size=3, max_size=3))
+def test_rotvec_periodicity(values):
+    inp = aa.asarray(values)
+
+    # Doesn't work for 0
+    hypothesis.assume(aa.linalg.vector_norm(inp) != 0)
+
+    rot = Rotation.from_rotvec(inp)
+
+    # Add 2*pi to the rotvec on the same axis
+    inp2 = inp + 2 * aa.pi * inp / aa.linalg.vector_norm(inp)
+    rot2 = Rotation.from_rotvec(inp2)
+
+    q1 = rot.as_quat()
+    q2 = rot2.as_quat()
+
+    assert quaternions_are_equal(q1, q2)
+
+
+# Quaternions that have opposite sign produce same rotation matrix
+@hypothesis.given(st.lists(st.floats(min_value=-1, max_value=1), min_size=4, max_size=4))
+def test_opposite_quaternions(values):
+    inp = aa.asarray(values)
+    hypothesis.assume(aa.linalg.vector_norm(inp) != 0)
+
+    rot = Rotation.from_quat(inp)
+
+    # Invert the quaternion
+    inp2 = -inp
+    rot2 = Rotation.from_quat(inp2)
+
+    # The rotation matrices should be the same
+    assert aa.all(rot.as_matrix() == rot2.as_matrix())
