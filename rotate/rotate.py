@@ -65,22 +65,20 @@ class Rotation:
         xp = array_api_compat.array_namespace(M)
 
         trM = M[..., 0, 0] + M[..., 1, 1] + M[..., 2, 2]
-        # trM = xp.trace(M)  # weirdly gives something else
 
-        opt1 = xp.stack([1 + 2 * M[..., 0, 0] - trM, M[..., 0, 1] + M[..., 1, 0], M[..., 0, 2] + M[..., 2, 0], M[..., 2, 1] - M[..., 1, 2]], axis=-1)
-        opt2 = xp.stack([M[..., 0, 1] + M[..., 1, 0], 1 + 2 * M[..., 1, 1] - trM, M[..., 1, 2] + M[..., 2, 1], M[..., 0, 2] - M[..., 2, 0]], axis=-1)
-        opt3 = xp.stack([M[..., 0, 2] + M[..., 2, 0], M[..., 1, 2] + M[..., 2, 1], 1 + 2 * M[..., 2, 2] - trM, M[..., 1, 0] - M[..., 0, 1]], axis=-1)
-        opt4 = xp.stack([M[..., 2, 1] - M[..., 1, 2], M[..., 0, 2] - M[..., 2, 0], M[..., 1, 0] - M[..., 0, 1], 1 + trM], axis=-1)
+        opt1 = xp.stack([M[..., 2, 1] - M[..., 1, 2], M[..., 0, 2] - M[..., 2, 0], M[..., 1, 0] - M[..., 0, 1], 1 + trM], axis=-1)
+        opt2 = xp.stack([1 + 2 * M[..., 0, 0] - trM, M[..., 0, 1] + M[..., 1, 0], M[..., 0, 2] + M[..., 2, 0], M[..., 2, 1] - M[..., 1, 2]], axis=-1)
+        opt3 = xp.stack([M[..., 0, 1] + M[..., 1, 0], 1 + 2 * M[..., 1, 1] - trM, M[..., 1, 2] + M[..., 2, 1], M[..., 0, 2] - M[..., 2, 0]], axis=-1)
+        opt4 = xp.stack([M[..., 0, 2] + M[..., 2, 0], M[..., 1, 2] + M[..., 2, 1], 1 + 2 * M[..., 2, 2] - trM, M[..., 1, 0] - M[..., 0, 1]], axis=-1)
 
-        # TODO check is abs right?
-        val1 = xp.abs(M[..., 0, 0])
-        val2 = xp.abs(M[..., 1, 1])
-        val3 = xp.abs(M[..., 2, 2])
-        val4 = xp.abs(trM)
+        val1 = trM
+        val2 = M[..., 0, 0]
+        val3 = M[..., 1, 1]
+        val4 = M[..., 2, 2]
 
-        c1 = (val1 > val4) & (val1 > val2) & (val1 > val3)
-        c2 = (val2 > val4) & (val2 > val1) & (val2 > val3)
-        c3 = (val3 > val4) & (val3 > val1) & (val3 > val2)
+        c1 = (val1 >= val2) & (val1 >= val3) & (val1 >= val4)
+        c2 = (val2 >= val1) & (val2 >= val3) & (val2 >= val4)
+        c3 = (val3 >= val1) & (val3 >= val2) & (val3 >= val4)
         # c4 = (trM > M[..., 0, 0]) & (trM > M[..., 1, 1]) & (trM > M[..., 2, 2])
 
         q = xp.where(c1[..., None], opt1, xp.where(c2[..., None], opt2, xp.where(c3[..., None], opt3, opt4)))
