@@ -7,6 +7,8 @@ import pytest
 
 from rotate import Rotation, skew
 
+aa.set_array_api_strict_flags(api_version="2023.12")
+
 
 def quaternions_are_equal(q1, q2):
     return (q1[0] == pytest.approx(q2[0]) and q1[1] == pytest.approx(q2[1]) and q1[2] == pytest.approx(q2[2]) and q1[3] == pytest.approx(q2[3])) or (
@@ -142,6 +144,7 @@ def test_to_matrix_and_back(values):
     mat = rot.as_matrix()
     rot2 = Rotation.from_matrix(mat)
 
+    # We don't compare to inp, which may not be normalized
     q1 = rot.as_quat()
     q2 = rot2.as_quat()
 
@@ -161,7 +164,36 @@ def test_to_rotvec_and_back(values):
     q1 = rot.as_quat()
     q2 = rot2.as_quat()
 
-    assert q1[0] == pytest.approx(q2[0])
-    assert q1[1] == pytest.approx(q2[1])
-    assert q1[2] == pytest.approx(q2[2])
-    assert q1[3] == pytest.approx(q2[3])
+    assert quaternions_are_equal(q1, q2)
+
+
+@hypothesis.given(st.lists(st.floats(min_value=-1, max_value=1), min_size=4, max_size=4))
+def test_to_mrp_and_back(values):
+    inp = aa.asarray(values)
+    hypothesis.assume(aa.linalg.vector_norm(inp) != 0)
+
+    rot = Rotation.from_quat(inp)
+
+    mrp = rot.as_mrp()
+    rot2 = Rotation.from_mrp(mrp)
+
+    q1 = rot.as_quat()
+    q2 = rot2.as_quat()
+
+    assert quaternions_are_equal(q1, q2)
+
+
+@hypothesis.given(st.lists(st.floats(min_value=-1, max_value=1), min_size=4, max_size=4))
+def test_to_euler_and_back(values):
+    inp = aa.asarray(values)
+    hypothesis.assume(aa.linalg.vector_norm(inp) != 0)
+
+    rot = Rotation.from_quat(inp)
+
+    eul = rot.as_euler("XYZ")
+    rot2 = Rotation.from_euler("XYZ", eul)
+
+    q1 = rot.as_quat()
+    q2 = rot2.as_quat()
+
+    assert quaternions_are_equal(q1, q2)

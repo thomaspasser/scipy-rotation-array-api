@@ -89,7 +89,16 @@ class Rotation:
     def from_rotvec(cls, rotvec):
         xp = array_api_compat.array_namespace(rotvec)
         angle = xp.linalg.vector_norm(rotvec, axis=-1, keepdims=True)
-        scale = xp.sin(angle / 2) / angle
+
+        scale1 = xp.sin(angle / 2) / angle
+        # Handle small angles
+        small = xp.abs(angle) <= 1e-3
+        # Taylor expansion
+        angle2 = angle * angle
+        scale2 = 0.5 - angle2 / 48 + angle2 * angle2 / 3840
+
+        scale = xp.where(small, scale2, scale1)
+
         c = xp.cos(angle / 2)
         q = xp.concat([scale * rotvec, c], axis=-1)
         # already normalized
@@ -186,20 +195,32 @@ class Rotation:
         xp = array_api_compat.array_namespace(self._quat)
         # We pick the sign of the scalar part to be positive
         # Ensures that the angle is between 0 and pi
-        sign = xp.where(self._quat[..., 3] > 0, 1, -1)
+
+        # xp.sign returns 0 for 0, so we need to calculate it
+        ones = xp.ones_like(self._quat[..., 3])
+        sign = xp.where(self._quat[..., 3] > 0, 1 * ones, -1 * ones)
 
         norm123 = xp.linalg.vector_norm(self._quat[..., :3], axis=-1)
         angle = 2 * xp.atan2(norm123, sign * self._quat[..., 3])
-        scale = angle / xp.sin(angle / 2)
-        return scale[..., :, None] * sign[..., :, None] * self._quat[..., :3]
+
+        scale1 = angle / xp.sin(angle / 2)
+        # Handle small angles
+        small = xp.abs(angle) <= 1e-3
+        # Taylor expansion
+        angle2 = angle * angle
+        scale2 = 2 + angle2 / 12 + 7 * angle2 * angle2 / 2880
+        scale = xp.where(small, scale2, scale1)
+
+        return scale[..., None] * sign[..., None] * self._quat[..., :3]
 
     def as_mrp(self):
         xp = array_api_compat.array_namespace(self._quat)
         # We pick the sign of the scalar part to be positive
         # This makes the MRP correspond to the smaller rotation of the two possible
-        sign = xp.where(self._quat[..., 3] > 0, 1, -1)
+        ones = xp.ones_like(self._quat[..., 3])
+        sign = xp.where(self._quat[..., 3] > 0, 1 * ones, -1 * ones)
 
-        return sign[:, None] * self._quat[..., :3] / (1 + sign * self._quat[..., 3])[:, None]
+        return sign[..., None] * self._quat[..., :3] / (1 + sign * self._quat[..., 3])[..., None]
 
     def as_euler(self, seq, degrees=False):
         # Based on scipy's implementation
@@ -246,19 +267,20 @@ class Rotation:
             opt0_angles0 = half_sum + half_diff
 
         opt1_angles0 = 2 * half_sum
+        opt2_angles0 = 2 * half_diff * (1 if intrinsic else -1)
         opt2_angles2 = xp.zeros_like(angles1)
         opt1_angles2 = xp.zeros_like(angles1)
 
-        angles0 = xp.where(c0, opt0_angles0, xp.where(c1, opt1_angles0, opt2_angles2))
+        angles0 = xp.where(c0, opt0_angles0, xp.where(c1, opt1_angles0, opt2_angles0))
         angles2 = xp.where(c0, opt0_angles2, xp.where(c1, opt1_angles2, opt2_angles2))
 
         angles = xp.stack([angles0, angles1, angles2], axis=-1)
         if not symmetric:
             if not intrinsic:
                 # These dtype and device arguments may be needed for e.g. GPU arrays
-                angles *= xp.asarray([1, 1, sign])  # , dtype=angles.dtype, device=angles.device)
+                angles *= xp.asarray([1.0, 1.0, sign])  # , dtype=angles.dtype, device=angles.device)
             else:
-                angles *= xp.asarray([sign, 1, 1])  # , dtype=angles.dtype, device=angles.device)
+                angles *= xp.asarray([sign, 1.0, 1.0])  # , dtype=angles.dtype, device=angles.device)
             angles -= xp.asarray([0, xp.pi / 2, 0])  # , dtype=angles.dtype, device=angles.device)
 
         # Wrap to [-pi, pi]
