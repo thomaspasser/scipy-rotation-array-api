@@ -216,6 +216,29 @@ def test_to_eulerZXZ_and_back(values):
     assert quaternions_are_equal(q1, q2)
 
 
+@hypothesis.given(st.lists(st.floats(min_value=-1, max_value=1), min_size=4, max_size=4))
+def test_to_davenport_and_back(values):
+    inp = aa.asarray(values)
+    hypothesis.assume(aa.linalg.vector_norm(inp) != 0)
+
+    rot = Rotation.from_quat(inp)
+
+    ex = [1.0, 0, 0]
+    ey = [0, 1.0, 0]
+    ez = [0, 0, 1.0]
+
+    axes = aa.asarray([ex, ey, ez])
+    order = "e"
+
+    d = rot.as_davenport(axes, order)
+    rot2 = Rotation.from_davenport(axes, order, d)
+
+    q1 = rot.as_quat()
+    q2 = rot2.as_quat()
+
+    assert quaternions_are_equal(q1, q2)
+
+
 # random quat and vector
 @hypothesis.given(
     st.lists(st.floats(min_value=-1, max_value=1), min_size=4, max_size=4), st.lists(st.floats(min_value=-1, max_value=1), min_size=3, max_size=3)
@@ -296,7 +319,7 @@ def test_quaternion_inverse(values):
 
 # zeroth power is identity
 @hypothesis.given(st.lists(st.floats(min_value=-1, max_value=1), min_size=4, max_size=4))
-def test_quaternion_power_identity(values):
+def test_quaternion_zeroth_power(values):
     inp = aa.asarray(values)
     hypothesis.assume(aa.linalg.vector_norm(inp) != 0)
 
@@ -309,3 +332,60 @@ def test_quaternion_power_identity(values):
     assert q[1] == pytest.approx(0.0)
     assert q[2] == pytest.approx(0.0)
     assert q[3] == pytest.approx(1.0)
+
+
+# first power is the same
+@hypothesis.given(st.lists(st.floats(min_value=-1, max_value=1), min_size=4, max_size=4))
+def test_quaternion_first_power(values):
+    inp = aa.asarray(values)
+    hypothesis.assume(aa.linalg.vector_norm(inp) != 0)
+
+    rot = Rotation.from_quat(inp)
+
+    rot2 = rot**1
+
+    q1 = rot.as_quat()
+    q2 = rot2.as_quat()
+
+    assert quaternions_are_equal(q1, q2)
+
+
+# n'th power is the same as
+@hypothesis.given(st.lists(st.floats(min_value=-1, max_value=1), min_size=4, max_size=4), st.integers(min_value=2, max_value=10))
+def test_quaternion_nth_power(values, n: int):
+    inp = aa.asarray(values)
+    hypothesis.assume(aa.linalg.vector_norm(inp) != 0)
+
+    rot = Rotation.from_quat(inp)
+    rot2 = rot**n
+
+    rot3 = Rotation.identity(aa)
+    for _ in range(n):
+        rot3 = rot3 * rot
+
+    q2 = rot2.as_quat()
+    q3 = rot3.as_quat()
+
+    assert quaternions_are_equal(q2, q3)
+
+
+# TODO this differs from scipy
+def test_euler_single():
+    eul = aa.asarray([0.0])
+    rot = Rotation.from_euler("z", eul)
+    assert rot.as_quat().shape == (1, 4)
+
+
+def test_euler_shape_Z():
+    eul = aa.linspace(0, 2 * aa.pi, 100)
+    rot = Rotation.from_euler("Z", eul)
+    assert len(rot) == 100
+    assert rot.as_quat().shape == (100, 4)
+
+
+def test_euler_shape_XYZ():
+    eul = aa.zeros((100, 3))
+    eul[:, 0] = aa.linspace(0, 2 * aa.pi, 100)
+    rot = Rotation.from_euler("XYZ", eul)
+    assert len(rot) == 100
+    assert rot.as_quat().shape == (100, 4)

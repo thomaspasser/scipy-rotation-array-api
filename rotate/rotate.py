@@ -129,11 +129,15 @@ class Rotation:
         if any(seq[i] == seq[i + 1] for i in range(num_axes - 1)):
             raise ValueError("Expected consecutive axes to be different, " "got {}".format(seq))
 
-        return seq.lower(), intrinsic, num_axes
+        return seq.lower(), extrinsic, num_axes
 
     @classmethod
     def from_euler(cls, seq, euler, degrees=False):
-        seq, intrinsic, num_axes = cls._check_seq(seq)
+        # Not really working with this ndim check
+        # TODO do like in scipy `_format_angles`
+        # if euler.ndim == 1:  # if seq is a single axis?
+        # euler = euler[:, None]
+        seq, extrinsic, num_axes = cls._check_seq(seq)
 
         xp = array_api_compat.array_namespace(euler)
 
@@ -142,10 +146,10 @@ class Rotation:
 
         result = cls._elementary_quat(seq[0], euler[..., 0])
         for i in range(1, num_axes):
-            if intrinsic:
-                result = cls._quat_mul(result, cls._elementary_quat(seq[i], euler[..., i]))
-            else:
+            if extrinsic:
                 result = cls._quat_mul(cls._elementary_quat(seq[i], euler[..., i]), result)
+            else:
+                result = cls._quat_mul(result, cls._elementary_quat(seq[i], euler[..., i]))
 
         return cls(result, normalize=True)
 
@@ -176,7 +180,47 @@ class Rotation:
 
     @classmethod
     def from_davenport(cls, axes, order, angles, degrees=False):
-        raise NotImplementedError("Not implemented yet.")
+        xp = array_api_compat.array_namespace(angles)
+        if order in ["e", "extrinsic"]:
+            extrinsic = True
+        elif order in ["i", "intrinsic"]:
+            extrinsic = False
+        else:
+            raise ValueError("order should be 'e'/'extrinsic' for extrinsic " "sequences or 'i'/'intrinsic' for intrinsic " "sequences, got {}".format(order))
+
+        axes = xp.asarray(axes)
+        if axes.ndim == 1:
+            axes = xp.reshape(axes, [1, 3])
+
+        num_axes = axes.shape[0]
+
+        if axes.shape[1] != 3:
+            raise ValueError("Axes must be vectors of length 3.")
+
+        if num_axes < 1 or num_axes > 3:
+            raise ValueError("Expected up to 3 axes, got {}".format(num_axes))
+
+        # normalize axes
+        norm = xp.repeat(xp.linalg.vector_norm(axes, axis=1), 3)
+        axes = axes / xp.reshape(norm, (num_axes, 3))
+
+        if num_axes > 1 and abs(xp.vecdot(axes[0, :], axes[1, :])) >= 1e-7 or num_axes > 2 and abs(xp.vecdot(axes[1, :], axes[2, :])) >= 1e-7:
+            raise ValueError("Consecutive axes must be orthogonal.")
+
+        # TODO handle shape here?
+        # angles, is_single = _format_angles(angles, degrees, num_axes)
+        if degrees:
+            angles = angles * xp.pi / 180.0
+
+        q = Rotation.identity(xp, angles.shape[:-1])
+        for i in range(num_axes):
+            qi = Rotation.from_rotvec(angles[..., i] * axes[i, :])
+            if extrinsic:
+                q = qi * q
+            else:
+                q = q * qi
+
+        return q
 
     def as_quat(self):
         return self._quat
@@ -234,9 +278,9 @@ class Rotation:
         # Based on scipy's implementation
         # But vectorized
         xp = array_api_compat.array_namespace(self._quat)
-        seq, intrinsic, _ = self._check_seq(seq)
+        seq, extrinsic, _ = self._check_seq(seq)
 
-        if intrinsic:
+        if not extrinsic:
             seq = seq[::-1]
 
         i = Rotation._axes.index(seq[0])
@@ -254,20 +298,28 @@ class Rotation:
         if not symmetric:
             temp += xp.stack([-self._quat[..., j], self._quat[..., k] * sign, self._quat[..., 3], -self._quat[..., i]], axis=-1)
 
+        angles = self._get_angles(temp, extrinsic, symmetric, sign, xp.pi / 2, temp)
+        if degrees:
+            angles = angles * 180 / xp.pi
+        return angles
+
+    @staticmethod
+    def _get_angles(extrinsic, symmetric, sign, lamb, abcd):
+        xp = array_api_compat.array_namespace(abcd)
         # Step 2
         # Compute second angle
-        angles1 = 2 * xp.atan2(xp.hypot(temp[..., 2], temp[..., 3]), xp.hypot(temp[..., 0], temp[..., 1]))
+        angles1 = 2 * xp.atan2(xp.hypot(abcd[..., 2], abcd[..., 3]), xp.hypot(abcd[..., 0], abcd[..., 1]))
 
         # Step 3
         # compute first and third angles, according to case
-        half_sum = xp.atan2(temp[..., 1], temp[..., 0])
-        half_diff = xp.atan2(temp[..., 3], temp[..., 2])
+        half_sum = xp.atan2(abcd[..., 1], abcd[..., 0])
+        half_diff = xp.atan2(abcd[..., 3], abcd[..., 2])
 
         c1 = xp.abs(angles1) < 1e-7
         c2 = xp.abs(angles1 - xp.pi) < 1e-7
         c0 = ~(c1 | c2)
 
-        if not intrinsic:
+        if extrinsic:
             opt0_angles0 = half_sum - half_diff
             opt0_angles2 = half_sum + half_diff
         else:
@@ -275,7 +327,7 @@ class Rotation:
             opt0_angles0 = half_sum + half_diff
 
         opt1_angles0 = 2 * half_sum
-        opt2_angles0 = 2 * half_diff * (1 if intrinsic else -1)
+        opt2_angles0 = 2 * half_diff * (-1 if extrinsic else 1)
         opt2_angles2 = xp.zeros_like(angles1)
         opt1_angles2 = xp.zeros_like(angles1)
 
@@ -284,23 +336,108 @@ class Rotation:
 
         angles = xp.stack([angles0, angles1, angles2], axis=-1)
         if not symmetric:
-            if not intrinsic:
+            if extrinsic:
                 # These dtype and device arguments may be needed for e.g. GPU arrays
                 angles *= xp.asarray([1.0, 1.0, sign])  # , dtype=angles.dtype, device=angles.device)
             else:
                 angles *= xp.asarray([sign, 1.0, 1.0])  # , dtype=angles.dtype, device=angles.device)
-            angles -= xp.asarray([0, xp.pi / 2, 0])  # , dtype=angles.dtype, device=angles.device)
+            angles -= xp.asarray([0, lamb, 0])  # , dtype=angles.dtype, device=angles.device)
 
         # Wrap to [-pi, pi]
         angles = (angles + xp.pi) % (2 * xp.pi) - xp.pi
+        return angles
+
+    @staticmethod
+    def _compute_davenport_from_quat(quat, n1, n2, n3, extrinsic):
+        xp = array_api_compat.array_namespace(quat)
+        # The algorithm assumes extrinsic frame transformations. The algorithm
+        # in the paper is formulated for rotation quaternions, which are stored
+        # directly by Rotation.
+        # Adapt the algorithm for our case by reversing both axis sequence and
+        # angles for intrinsic rotations when needed
+
+        if not extrinsic:
+            n1, n3 = n3, n1
+
+        n_cross = xp.linalg.cross(n1, n2)
+        lamb = xp.atan2(xp.linalg.vecdot(n3, n_cross), xp.linalg.vecdot(n3, n1))
+
+        correct_set = False
+        if lamb < 0:
+            # alternative set of angles compatible with as_euler implementation
+            n2 = -n2
+            lamb = -lamb
+            n_cross[0] = -n_cross[0]
+            n_cross[1] = -n_cross[1]
+            n_cross[2] = -n_cross[2]
+            correct_set = True
+
+        quat_lamb = xp.asarray(
+            [xp.sin(lamb / 2) * n2[0], xp.sin(lamb / 2) * n2[1], xp.sin(lamb / 2) * n2[2], xp.cos(lamb / 2)], dtype=quat.dtype, device=quat.device
+        )
+
+        # some forward definitions
+        quat_transformed = Rotation._quat_mul(quat_lamb, quat)
+
+        # Step 1
+        # Permutate quaternion elements
+        a = quat_transformed[..., 3]
+        b = xp.linalg.vecdot(quat_transformed[..., :3], n1)
+        c = xp.linalg.vecdot(quat_transformed[..., :3], n2)
+        d = xp.linalg.vecdot(quat_transformed[..., :3], n_cross)
+        abcd = xp.stack([a, b, c, d], axis=-1)
+
+        angles = Rotation._get_angles(extrinsic, False, 1, lamb, abcd)
+
+        if correct_set:
+            angles *= xp.asarray([1.0, -1.0, 1.0], dtype=angles.dtype, device=angles.device)
+
+        return angles
+
+    def as_davenport(self, axes, order, degrees=False):
+        xp = array_api_compat.array_namespace(self._quat)
+        if order in ["e", "extrinsic"]:
+            extrinsic = True
+        elif order in ["i", "intrinsic"]:
+            extrinsic = False
+        else:
+            raise ValueError("order should be 'e'/'extrinsic' for extrinsic " "sequences or 'i'/'intrinsic' for intrinsic " "sequences, got {}".format(order))
+
+        # if len(axes) != 3:
+        #     raise ValueError("Expected 3 axes, got {}.".format(len(axes)))
+
+        # axes = xp.asarray(axes)
+
+        # if axes.shape[1] != 3:
+        #     raise ValueError("Axes must be vectors of length 3.")
+
+        # n1, n2, n3 = axes
+        n1 = axes[0, :]
+        n2 = axes[1, :]
+        n3 = axes[2, :]
+
+        # normalize axes
+        n1 = n1 / xp.linalg.vector_norm(n1)
+        n2 = n2 / xp.linalg.vector_norm(n2)
+        n3 = n3 / xp.linalg.vector_norm(n3)
+
+        if xp.linalg.vecdot(n1, n2) >= 1e-7:
+            raise ValueError("Consecutive axes must be orthogonal.")
+        if xp.linalg.vecdot(n2, n3) >= 1e-7:
+            raise ValueError("Consecutive axes must be orthogonal.")
+
+        quat = self.as_quat()
+
+        # TODO handle shape here?
+        # if quat.ndim == 1:
+        #     quat = quat[None, :]
+
+        angles = self._compute_davenport_from_quat(quat, n1, n2, n3, extrinsic)
 
         if degrees:
             angles = angles * 180 / xp.pi
 
         return angles
-
-    def as_davenport(self, axes, order, degrees=False):
-        raise NotImplementedError("Not implemented yet.")
 
     @classmethod
     def concatenate(cls, rotations: List[Self]):
@@ -355,7 +492,14 @@ class Rotation:
         return 2 * xp.atan2(norm123, xp.abs(self._quat[..., 3]))
 
     def approx_equal(self, other: Self, atol=None, degrees=False):
-        raise NotImplementedError("Not implemented yet.")
+        xp = array_api_compat.array_namespace(self._quat)
+        if atol is None:
+            atol = 1e-8  # radians
+        if degrees:
+            atol = atol * 180 / xp.pi
+
+        angles = (other * self.inv()).magnitude()
+        return angles < atol
 
     def mean(self, weights=None):
         # scipy copy pasta with some xp thrown in

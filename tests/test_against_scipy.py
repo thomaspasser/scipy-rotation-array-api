@@ -230,3 +230,17 @@ def test_apply_single_rot(quat):
     v_rot_exp = sRotation.from_quat(quat[0]).apply(v)
 
     assert np.allclose(v_rot, v_rot_exp)
+
+
+def test_approx_equal(quat):
+    q = quat[0]
+    eul = np.linspace(0, 1e-7, 50)
+
+    R1 = Rotation(q)
+    dR = Rotation.from_euler("Z", eul)
+    R2 = R1 * dR
+
+    eq = R2.approx_equal(R1)
+
+    eq_exp = (sRotation.from_quat(q) * sRotation.from_euler("Z", eul)).approx_equal(sRotation.from_quat(q))
+    assert np.all(eq == eq_exp)
